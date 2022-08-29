@@ -455,14 +455,13 @@ func (w *Worker) Run(ctx context.Context) {
 			continue
 		}
 		var destKey *string
-		index := strings.LastIndex(obj.Key, "/")
-		if index == -1 {
-			destKey = appendPrefix(&obj.Key, &w.cfg.DestPrefix)
-		} else {
-			fileKey := obj.Key[index+1:]
-			destKey = appendPrefix(&fileKey, &w.cfg.DestPrefix)
-		}
 
+		srcPrefix := w.cfg.SrcPrefix
+		fileKey := obj.Key
+		if len(srcPrefix) > 0 && srcPrefix != "/" {
+			fileKey = *removePrefix(&obj.Key, &srcPrefix)
+		}
+		destKey = appendPrefix(&fileKey, &w.cfg.DestPrefix)
 		if action == Transfer {
 			processCh <- struct{}{}
 			go w.startMigration(ctx, obj, rh, destKey, transferCh, processCh)
