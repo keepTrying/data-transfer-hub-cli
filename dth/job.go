@@ -454,8 +454,14 @@ func (w *Worker) Run(ctx context.Context) {
 		if obj == nil { // Empty message
 			continue
 		}
-
-		destKey := appendPrefix(&obj.Key, &w.cfg.DestPrefix)
+		var destKey *string
+		index := strings.LastIndex(obj.Key, "/")
+		if index == -1 {
+			destKey = appendPrefix(&obj.Key, &w.cfg.DestPrefix)
+		} else {
+			fileKey := obj.Key[index+1:]
+			destKey = appendPrefix(&fileKey, &w.cfg.DestPrefix)
+		}
 
 		if action == Transfer {
 			processCh <- struct{}{}
