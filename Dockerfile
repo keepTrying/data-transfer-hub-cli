@@ -3,9 +3,9 @@ FROM amazonlinux:latest as builder
 RUN yum update -y && yum install -y tar gzip
 
 RUN cd /tmp && \
-    curl -LO https://golang.org/dl/go1.16.4.linux-amd64.tar.gz && \
+    curl -LO https://golang.org/dl/go1.16.4.linux-arm64.tar.gz && \
     rm -rf /usr/local/go && \
-    tar -C /usr/local -xzf /tmp/go1.16.4.linux-amd64.tar.gz
+    tar -C /usr/local -xzf /tmp/go1.16.4.linux-arm64.tar.gz
 
 WORKDIR /build
 COPY . .
@@ -46,4 +46,4 @@ ENV WORKER_NUMBER 4
 WORKDIR /app
 RUN touch config.yaml
 COPY --from=builder /build/dthcli .
-ENTRYPOINT ["/app/dthcli", "run"]
+#ENTRYPOINT ["/app/dthcli", "run"]

