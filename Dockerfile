@@ -3,7 +3,7 @@ FROM amazonlinux:latest as builder
 RUN yum update -y && yum install -y tar gzip
 
 RUN cd /tmp && \
-    curl -LO https://golang.org/dl/go1.16.4.linux-arm64.tar.gz && \
+    curl -LO https://golang.google.cn/dl/go1.16.4.linux-arm64.tar.gz && \
     rm -rf /usr/local/go && \
     tar -C /usr/local -xzf /tmp/go1.16.4.linux-arm64.tar.gz
 
