@@ -619,8 +619,9 @@ func (w *Worker) heartBeat(ctx context.Context, key, rh *string) {
 			i++
 			// log.Printf("Heart Beat %d for %s", i, *key)
 			if i%timeout == 0 {
-				sec := int32((i + timeout) * interval)
-				log.Printf("Change timeout for %s to %d seconds", *key, sec)
+				//sec := int32((i + timeout) * interval)
+				//log.Printf("Change timeout for %s to %d seconds", *key, sec)
+				log.Printf("terminal instance for %s", *key)
 				cmd := exec.Command("/bin/sh", "-c", "sudo shutdown now")
 				cmd.Run()
 				//w.sqs.ChangeVisibilityTimeout(ctx, rh, sec)
