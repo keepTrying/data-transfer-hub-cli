@@ -256,7 +256,8 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 		for _, obj := range source {
 			// TODO: Check if there is another way to compare
 			// Currently, map is used to search if such object exists in target
-			if tsize, found := target[obj.Key]; !found || *tsize != obj.Size {
+			srcKey := removePrefix(&obj.Key, prefix)
+			if tsize, found := target[*srcKey]; !found || *tsize != obj.Size {
 				// log.Printf("Find a difference %s - %d\n", key, size)
 				// batch[i] = obj.toString()
 				msgCh <- obj.toString()
