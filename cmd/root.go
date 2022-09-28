@@ -28,7 +28,7 @@ import (
 )
 
 // Version Number
-const Version = "v1.0.1"
+const Version = "v1.0.2"
 
 var (
 	cfgFile, jobType string
@@ -69,11 +69,13 @@ func init() {
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	viper.SetDefault("srcType", "Amazon_S3")
-	viper.SetDefault("destStorageClass", "STANDARD")
 	viper.SetDefault("srcPrefix", "")
 	viper.SetDefault("srcPrefixList", "")
 	viper.SetDefault("srcCredential", "")
 	viper.SetDefault("srcEndpoint", "")
+	viper.SetDefault("destType", "Amazon_S3")
+	viper.SetDefault("destEndpoint", "")
+	viper.SetDefault("destStorageClass", "STANDARD")
 	viper.SetDefault("destPrefix", "")
 	viper.SetDefault("destCredential", "")
 	viper.SetDefault("destAcl", "bucket-owner-full-control")
@@ -97,9 +99,11 @@ func initConfig() {
 	viper.BindEnv("srcInCurrentAccount", "SRC_IN_CURRENT_ACCOUNT")
 	viper.BindEnv("skipCompare", "SKIP_COMPARE")
 
+	viper.BindEnv("destType", "DEST_TYPE")
 	viper.BindEnv("destBucket", "DEST_BUCKET")
 	viper.BindEnv("destPrefix", "DEST_PREFIX")
 	viper.BindEnv("destRegion", "DEST_REGION")
+	viper.BindEnv("destEndpoint", "DEST_ENDPOINT")
 	viper.BindEnv("destCredential", "DEST_CREDENTIALS")
 	viper.BindEnv("destInCurrentAccount", "DEST_IN_CURRENT_ACCOUNT")
 	viper.BindEnv("destStorageClass", "DEST_STORAGE_CLASS")
@@ -155,9 +159,11 @@ func initConfig() {
 		SrcCredential:        viper.GetString("srcCredential"),
 		SrcInCurrentAccount:  viper.GetBool("srcInCurrentAccount"),
 		SkipCompare:          viper.GetBool("skipCompare"),
+		DestType:             viper.GetString("destType"),
 		DestBucket:           viper.GetString("destBucket"),
 		DestPrefix:           viper.GetString("destPrefix"),
 		DestRegion:           viper.GetString("destRegion"),
+		DestEndpoint:         viper.GetString("destEndpoint"),
 		DestCredential:       viper.GetString("destCredential"),
 		DestStorageClass:     viper.GetString("destStorageClass"),
 		DestAcl:              viper.GetString("destAcl"),

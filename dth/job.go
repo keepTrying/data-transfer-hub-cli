@@ -115,7 +115,7 @@ func NewFinder(ctx context.Context, cfg *JobConfig) (f *Finder) {
 	desCred := getCredentials(ctx, cfg.DestCredential, cfg.DestInCurrentAccount, sm)
 
 	srcClient := NewS3Client(ctx, cfg.SrcBucket, cfg.SrcPrefix, cfg.SrcPrefixList, cfg.SrcEndpoint, cfg.SrcRegion, cfg.SrcType, srcCred)
-	desClient := NewS3Client(ctx, cfg.DestBucket, cfg.DestPrefix, "", "", cfg.DestRegion, "Amazon_S3", desCred)
+	desClient := NewS3Client(ctx, cfg.DestBucket, cfg.DestPrefix, "", cfg.DestEndpoint, cfg.DestRegion, cfg.DestType, desCred)
 
 	f = &Finder{
 		srcClient: srcClient,
@@ -413,7 +413,7 @@ func NewWorker(ctx context.Context, cfg *JobConfig) (w *Worker) {
 	desCred := getCredentials(ctx, cfg.DestCredential, cfg.DestInCurrentAccount, sm)
 
 	srcClient := NewS3Client(ctx, cfg.SrcBucket, cfg.SrcPrefix, cfg.SrcPrefixList, cfg.SrcEndpoint, cfg.SrcRegion, cfg.SrcType, srcCred)
-	desClient := NewS3Client(ctx, cfg.DestBucket, cfg.DestPrefix, "", "", cfg.DestRegion, "Amazon_S3", desCred)
+	desClient := NewS3Client(ctx, cfg.DestBucket, cfg.DestPrefix, "", cfg.DestEndpoint, cfg.DestRegion, cfg.DestType, desCred)
 
 	return &Worker{
 		srcClient: srcClient,

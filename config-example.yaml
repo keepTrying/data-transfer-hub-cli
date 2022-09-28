@@ -1,18 +1,20 @@
 srcType: Amazon_S3
 srcBucket: src-bucket
-srcPrefix:
-srcRegion: us-west-2
+srcPrefix: test-fs-app/
+srcRegion: ap-northeast-2
 srcEndpoint:
-srcCredential: src
+srcCredential: global
 srcInCurrentAccount: false
 skipCompare: false
 
+destType: Aliyun_OSS
 destBucket: dest-bucket
-destPrefix:
-destRegion: cn-north-1
-destCredential:
+destPrefix: test-fs-app/testdth/
+destRegion: oss-cn-beijing
+destEndpoint: oss-cn-beijing.aliyuncs.com
+destCredential: cn-oss
 destStorageClass: STANDARD
-destInCurrentAccount: true
+destInCurrentAccount: false
 destAcl: bucket-owner-full-control
 
 jobTableName: test-table
@@ -25,5 +27,5 @@ options:
   messageBatchSize: 10
   finderDepth: 0
   finderNumber: 1
-  workerNumber: 4
+  workerNumber: 8
   includeMetadata: false
