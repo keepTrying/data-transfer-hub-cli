@@ -1,6 +1,6 @@
 srcType: Amazon_S3
-srcBucket: src-bucket
-srcPrefix: test-fs-app/
+srcBucket: test-fs-app
+srcPrefix:
 srcRegion: ap-northeast-2
 srcEndpoint:
 srcCredential: global
@@ -8,9 +8,9 @@ srcInCurrentAccount: false
 skipCompare: false
 
 destType: Aliyun_OSS
-destBucket: dest-bucket
-destPrefix: test-fs-app/testdth/
-destRegion: oss-cn-beijing
+destBucket: test-fs-app
+destPrefix: testdth/
+destRegion:
 destEndpoint: oss-cn-beijing.aliyuncs.com
 destCredential: cn-oss
 destStorageClass: STANDARD
