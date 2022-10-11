@@ -54,7 +54,7 @@ const (
 	DefaultFinderNumber int = 1
 
 	// DefaultWorkerNumber is the number of worker threads to run in parallel
-	DefaultWorkerNumber int = 4
+	DefaultWorkerNumber int = 8
 )
 
 // JobOptions is General Job Info

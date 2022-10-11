@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"log"
 	"strconv"
 	"time"
@@ -34,10 +35,11 @@ import (
 
 // Item holds info about the items to be stored in DynamoDB
 type Item struct {
-	ObjectKey                                     string
-	JobStatus, Etag, Sequencer                    string
-	Size, StartTimestamp, EndTimestamp, SpentTime int64
-	StartTime, EndTime                            string
+	ObjectKey                                            string
+	JobStatus, Etag, Sequencer                           string
+	Size, StartTimestamp, EndTimestamp, SpentTime, Start int64
+	StartTime, EndTime, UploadId                         string
+	Number, ChunckSize                                   int
 	// ExtraInfo               Metadata
 }
 
@@ -308,6 +310,10 @@ func (db *DBService) PutItem(ctx context.Context, o *Object) error {
 		JobStatus:      "STARTED",
 		StartTime:      time.Now().Format("2006/01/02 15:04:05"),
 		StartTimestamp: time.Now().Unix(),
+		Number:         o.Number,
+		UploadId:       o.UploadId,
+		Start:          o.Start,
+		ChunckSize:     o.ChunkSize,
 	}
 
 	itemAttr, err := attributevalue.MarshalMap(item)
@@ -332,7 +338,7 @@ func (db *DBService) PutItem(ctx context.Context, o *Object) error {
 }
 
 // UpdateItem is a function to update an item in DynamoDB
-func (db *DBService) UpdateItem(ctx context.Context, key *string, result *TransferResult) error {
+func (db *DBService) UpdateItem(ctx context.Context, key *string, number int, result *TransferResult) error {
 	// log.Printf("Update item for %s in DynamoDB\n", *key)
 
 	etag := ""
@@ -346,6 +352,7 @@ func (db *DBService) UpdateItem(ctx context.Context, key *string, result *Transf
 		TableName: &db.tableName,
 		Key: map[string]dtype.AttributeValue{
 			"ObjectKey": &dtype.AttributeValueMemberS{Value: *key},
+			"Number":    &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
 		},
 		ExpressionAttributeValues: map[string]dtype.AttributeValue{
 			":s":   &dtype.AttributeValueMemberS{Value: result.status},
@@ -373,7 +380,7 @@ func (db *DBService) UpdateItem(ctx context.Context, key *string, result *Transf
 }
 
 // UpdateSequencer is a function to update an item with new Sequencer in DynamoDB
-func (db *DBService) UpdateSequencer(ctx context.Context, key, sequencer *string) error {
+func (db *DBService) UpdateSequencer(ctx context.Context, key, sequencer *string, number int) error {
 	// log.Printf("Update Sequencer for %s in DynamoDB\n", *key)
 
 	expr := "set Sequencer = :s"
@@ -382,6 +389,7 @@ func (db *DBService) UpdateSequencer(ctx context.Context, key, sequencer *string
 		TableName: &db.tableName,
 		Key: map[string]dtype.AttributeValue{
 			"ObjectKey": &dtype.AttributeValueMemberS{Value: *key},
+			"Number":    &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
 		},
 		ExpressionAttributeValues: map[string]dtype.AttributeValue{
 			":s": &dtype.AttributeValueMemberS{Value: *sequencer},
@@ -406,13 +414,14 @@ func (db *DBService) UpdateSequencer(ctx context.Context, key, sequencer *string
 }
 
 // QueryItem is a function to query an item by Key in DynamoDB
-func (db *DBService) QueryItem(ctx context.Context, key *string) (*Item, error) {
+func (db *DBService) QueryItem(ctx context.Context, key *string, number int) (*Item, error) {
 	// log.Printf("Query item for %s in DynamoDB\n", *key)
 
 	input := &dynamodb.GetItemInput{
 		TableName: &db.tableName,
 		Key: map[string]dtype.AttributeValue{
 			"ObjectKey": &dtype.AttributeValueMemberS{Value: *key},
+			"Number":    &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
 		},
 	}
 
@@ -435,5 +444,77 @@ func (db *DBService) QueryItem(ctx context.Context, key *string) (*Item, error) 
 		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
 	}
 	return item, nil
+
+}
+
+// QueryNotDoneItem is a function to query a not done item by Key and number in DynamoDB
+func (db *DBService) QueryNotDoneItem(ctx context.Context, key *string, number int) (*Item, error) {
+	// log.Printf("Query item for %s in DynamoDB\n", *key)
+
+	input := &dynamodb.GetItemInput{
+		TableName: &db.tableName,
+		Key: map[string]dtype.AttributeValue{
+			"ObjectKey": &dtype.AttributeValueMemberS{Value: *key},
+			"Number":    &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
+		},
+		ExpressionAttributeNames: map[string]string{"done": "DONE"},
+		ProjectionExpression:     aws.String("JobStatus <> :done"),
+	}
+
+	output, err := db.client.GetItem(ctx, input)
+
+	if err != nil {
+		log.Printf("Error querying item for %s in DynamoDB - %s\n", *key, err.Error())
+		return nil, err
+	}
+
+	if output.Item == nil {
+		log.Printf("Item for %s does not exist in DynamoDB", *key)
+		return nil, nil
+	}
+
+	item := &Item{}
+
+	err = attributevalue.UnmarshalMap(output.Item, item)
+	if err != nil {
+		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
+	}
+	return item, nil
+
+}
+
+// QueryItems is a function to query items by Key in DynamoDB
+func (db *DBService) QueryItems(ctx context.Context, key *string, number int) ([]*Item, error) {
+	// log.Printf("Query item for %s in DynamoDB\n", *key)
+	input := &dynamodb.QueryInput{
+		TableName: &db.tableName,
+		ExpressionAttributeValues: map[string]dtype.AttributeValue{
+			"o": &dtype.AttributeValueMemberS{Value: *key},
+			"n": &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
+		},
+		KeyConditionExpression:   aws.String("ObjectKey = :o AND Number = :n"),
+		AttributesToGet:          []string{"Etag", "Number"},
+		ExpressionAttributeNames: map[string]string{},
+	}
+
+	output, err := db.client.Query(ctx, input)
+
+	if err != nil {
+		log.Printf("Error querying item for %s in DynamoDB - %s\n", *key, err.Error())
+		return nil, err
+	}
+
+	if output.Items == nil || len(output.Items) == 0 {
+		log.Printf("Item for %s does not exist in DynamoDB", *key)
+		return nil, nil
+	}
+
+	items := make([]*Item, len(output.Items))
+
+	err = attributevalue.UnmarshalListOfMaps(output.Items, items)
+	if err != nil {
+		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
+	}
+	return items, nil
 
 }

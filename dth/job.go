@@ -53,6 +53,7 @@ type Finder struct {
 	srcClient, desClient Client
 	sqs                  *SqsService
 	cfg                  *JobConfig
+	db                   *DBService
 }
 
 // Worker is an implemenation of Job interface
@@ -110,7 +111,7 @@ func NewFinder(ctx context.Context, cfg *JobConfig) (f *Finder) {
 	if err != nil {
 		log.Printf("Warning - Unable to load credentials, use default setting - %s\n", err.Error())
 	}
-
+	db, _ := NewDBService(ctx, cfg.JobTableName)
 	srcCred := getCredentials(ctx, cfg.SrcCredential, cfg.SrcInCurrentAccount, sm)
 	desCred := getCredentials(ctx, cfg.DestCredential, cfg.DestInCurrentAccount, sm)
 
@@ -122,7 +123,24 @@ func NewFinder(ctx context.Context, cfg *JobConfig) (f *Finder) {
 		desClient: desClient,
 		sqs:       sqs,
 		cfg:       cfg,
+		db:        db,
 	}
+	return
+}
+
+// A func to get total number of parts required based on object size
+// Auto extend chunk size if total parts are greater than MaxParts (10000)
+func (f *Finder) getTotalParts(size int64) (totalParts, chunkSize int) {
+	// Max number of Parts allowed by Amazon S3 is 10000
+	maxParts := 10000
+
+	chunkSize = f.cfg.ChunkSize * MB
+
+	if int64(maxParts*chunkSize) < size {
+		chunkSize = int(size/int64(maxParts)) + 1
+	}
+	totalParts = int(math.Ceil(float64(size) / float64(chunkSize)))
+	// log.Printf("Total parts: %d, chunk size: %d", totalParts, chunkSize)
 	return
 }
 
@@ -283,6 +301,106 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 					}(f.cfg.MessageBatchSize)
 					i = 0
 				}
+
+				if obj.Size > int64(f.cfg.ChunkSize) {
+					partSum, chunkSize := f.getTotalParts(obj.Size)
+					var partNum int
+					var start int64
+
+					var meta *Metadata
+					if f.cfg.IncludeMetadata {
+						meta = f.srcClient.HeadObject(ctx, &obj.Key)
+					}
+				createMultipartUpload:
+					//create multipart upload
+					uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, &obj.Key, &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
+					if err2 != nil {
+						log.Printf("create multipart upload fail! err:%v \n", err2.Error())
+						time.Sleep(1 * time.Minute)
+						goto createMultipartUpload
+					}
+					for {
+						partNum++
+						curChunkSize := chunkSize
+						if partNum > partSum {
+							break
+						} else if partNum == partSum {
+							curChunkSize = int(obj.Size - start + 1)
+						}
+						var sObj = &Object{
+							Key:       obj.Key,
+							Size:      obj.Size,
+							Sequencer: obj.Sequencer,
+							Number:    partNum,
+							UploadId:  *uploadId,
+							Start:     start,
+							ChunkSize: curChunkSize,
+						}
+						msgCh <- sObj.toString()
+						// Log in DynamoDB
+					putToDb:
+						err3 := f.db.PutItem(ctx, obj)
+						if err3 != nil {
+							log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+							time.Sleep(1 * time.Minute)
+							goto putToDb
+						}
+						start += int64(curChunkSize)
+						i++
+						if i%f.cfg.MessageBatchSize == 0 {
+							wg.Add(1)
+							j++
+							if j%100 == 0 {
+								log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
+							}
+							batchCh <- struct{}{}
+
+							// start a go routine to send messages in b,match
+							go func(i int) {
+								defer wg.Done()
+								batch := make([]*string, i)
+								for a := 0; a < i; a++ {
+									batch[a] = <-msgCh
+								}
+
+								f.sqs.SendMessageInBatch(ctx, batch)
+								<-batchCh
+							}(f.cfg.MessageBatchSize)
+							i = 0
+						}
+					}
+				} else {
+					msgCh <- obj.toString()
+				putToDb1:
+					err3 := f.db.PutItem(ctx, obj)
+					if err3 != nil {
+						log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+						time.Sleep(1 * time.Minute)
+						goto putToDb1
+					}
+					i++
+					if i%f.cfg.MessageBatchSize == 0 {
+						wg.Add(1)
+						j++
+						if j%100 == 0 {
+							log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
+						}
+						batchCh <- struct{}{}
+
+						// start a go routine to send messages in b,match
+						go func(i int) {
+							defer wg.Done()
+							batch := make([]*string, i)
+							for a := 0; a < i; a++ {
+								batch[a] = <-msgCh
+							}
+
+							f.sqs.SendMessageInBatch(ctx, batch)
+							<-batchCh
+						}(f.cfg.MessageBatchSize)
+						i = 0
+					}
+				}
 			}
 		}
 	}
@@ -349,29 +467,107 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 		for _, obj := range source {
 			// TODO: Check if there is another way to compare
 			// Currently, map is used to search if such object exists in target
-			msgCh <- obj.toString()
-			i++
-			if i%f.cfg.MessageBatchSize == 0 {
-				wg.Add(1)
-				j++
-				if j%100 == 0 {
-					log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
+
+			if obj.Size > int64(f.cfg.ChunkSize) {
+				partSum, chunkSize := f.getTotalParts(obj.Size)
+				var partNum int
+				var start int64
+
+				var meta *Metadata
+				if f.cfg.IncludeMetadata {
+					meta = f.srcClient.HeadObject(ctx, &obj.Key)
 				}
-				batchCh <- struct{}{}
-
-				// start a go routine to send messages in b，match
-				go func(i int) {
-					defer wg.Done()
-					batch := make([]*string, i)
-					for a := 0; a < i; a++ {
-						batch[a] = <-msgCh
+			createMultipartUpload:
+				//create multipart upload
+				uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, &obj.Key, &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
+				if err2 != nil {
+					log.Printf("create multipart upload fail! err:%v \n", err2.Error())
+					time.Sleep(1 * time.Minute)
+					goto createMultipartUpload
+				}
+				for {
+					partNum++
+					curChunkSize := chunkSize
+					if partNum > partSum {
+						break
+					} else if partNum == partSum {
+						curChunkSize = int(obj.Size - start + 1)
 					}
+					var sObj = &Object{
+						Key:       obj.Key,
+						Size:      obj.Size,
+						Sequencer: obj.Sequencer,
+						Number:    partNum,
+						UploadId:  *uploadId,
+						Start:     start,
+						ChunkSize: curChunkSize,
+					}
+					msgCh <- sObj.toString()
+					// Log in DynamoDB
+				putToDb:
+					err3 := f.db.PutItem(ctx, obj)
+					if err3 != nil {
+						log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+						time.Sleep(1 * time.Minute)
+						goto putToDb
+					}
+					start += int64(curChunkSize)
+					i++
+					if i%f.cfg.MessageBatchSize == 0 {
+						wg.Add(1)
+						j++
+						if j%100 == 0 {
+							log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
+						}
+						batchCh <- struct{}{}
 
-					f.sqs.SendMessageInBatch(ctx, batch)
-					<-batchCh
-				}(f.cfg.MessageBatchSize)
-				i = 0
+						// start a go routine to send messages in b,match
+						go func(i int) {
+							defer wg.Done()
+							batch := make([]*string, i)
+							for a := 0; a < i; a++ {
+								batch[a] = <-msgCh
+							}
+
+							f.sqs.SendMessageInBatch(ctx, batch)
+							<-batchCh
+						}(f.cfg.MessageBatchSize)
+						i = 0
+					}
+				}
+			} else {
+				msgCh <- obj.toString()
+			putToDb1:
+				err3 := f.db.PutItem(ctx, obj)
+				if err3 != nil {
+					log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+					time.Sleep(1 * time.Minute)
+					goto putToDb1
+				}
+				i++
+				if i%f.cfg.MessageBatchSize == 0 {
+					wg.Add(1)
+					j++
+					if j%100 == 0 {
+						log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
+					}
+					batchCh <- struct{}{}
+
+					// start a go routine to send messages in b,match
+					go func(i int) {
+						defer wg.Done()
+						batch := make([]*string, i)
+						for a := 0; a < i; a++ {
+							batch[a] = <-msgCh
+						}
+
+						f.sqs.SendMessageInBatch(ctx, batch)
+						<-batchCh
+					}(f.cfg.MessageBatchSize)
+					i = 0
+				}
 			}
+
 		}
 	}
 	// For remainning objects.
@@ -518,7 +714,7 @@ func (w *Worker) processMessage(ctx context.Context, msg, rh *string) (obj *Obje
 
 		var oldSeq int64 = 0
 		// Get old sequencer from DynamoDB
-		item, _ := w.db.QueryItem(ctx, &event.Records[0].S3.Key)
+		item, _ := w.db.QueryItem(ctx, &event.Records[0].S3.Key, event.Records[0].S3.Number)
 		if item != nil {
 			oldSeq = getHex(&item.Sequencer)
 		}
@@ -550,14 +746,11 @@ func (w *Worker) startMigration(ctx context.Context, obj *Object, rh, destKey *s
 
 	log.Printf("Migrating from %s/%s to %s/%s\n", w.cfg.SrcBucket, obj.Key, w.cfg.DestBucket, *destKey)
 
-	// Log in DynamoDB
-	w.db.PutItem(ctx, obj)
-
 	// Start a heart beat
 	go w.heartBeat(ctx1, &obj.Key, rh)
 
 	var res *TransferResult
-	if obj.Size <= int64(w.cfg.MultipartThreshold*MB) {
+	if len(obj.UploadId) == 0 {
 		res = w.migrateSmallFile(ctx, obj, destKey, transferCh)
 	} else {
 		res = w.migrateBigFile(ctx, obj, destKey, transferCh)
@@ -578,7 +771,7 @@ func (w *Worker) startDelete(ctx context.Context, obj *Object, rh, destKey *stri
 
 	// Currently, only Sequencer is updated with the latest one, no other info logged for delete action
 	// This might be changed in future for debug purpose
-	w.db.UpdateSequencer(ctx, &obj.Key, &obj.Sequencer)
+	w.db.UpdateSequencer(ctx, &obj.Key, &obj.Sequencer, obj.Number)
 
 	err := w.desClient.DeleteObject(ctx, destKey)
 	if err != nil {
@@ -596,7 +789,7 @@ func (w *Worker) processResult(ctx context.Context, obj *Object, rh *string, res
 	// log.Println("Processing result...")
 
 	log.Printf("----->Transferred 1 object %s with status %s\n", obj.Key, res.status)
-	w.db.UpdateItem(ctx, &obj.Key, res)
+	w.db.UpdateItem(ctx, &obj.Key, obj.Number, res)
 
 	if res.status == "DONE" || res.status == "CANCEL" {
 		w.sqs.DeleteMessage(ctx, rh)
@@ -626,9 +819,9 @@ func (w *Worker) heartBeat(ctx context.Context, key, rh *string) {
 				cmd := exec.Command("/bin/sh", "-c", "sudo shutdown now")
 				cmd.Run()
 				//w.sqs.ChangeVisibilityTimeout(ctx, rh, sec)
+			} else {
+				time.Sleep(time.Second * time.Duration(interval))
 			}
-
-			time.Sleep(time.Second * time.Duration(interval))
 		}
 	}
 }
@@ -661,26 +854,43 @@ func (w *Worker) migrateSmallFile(ctx context.Context, obj *Object, destKey *str
 func (w *Worker) migrateBigFile(ctx context.Context, obj *Object, destKey *string, transferCh chan struct{}) *TransferResult {
 
 	var err error
-	var parts map[int]*Part
 
-	uploadID := w.desClient.GetUploadID(ctx, destKey)
-
-	// If uploadID Found, use list parts to get all existing parts.
-	// Else Create a new upload ID
-	if uploadID != nil {
-		// log.Printf("Found upload ID %s", *uploadID)
-		parts = w.desClient.ListParts(ctx, destKey, uploadID)
-
-	} else {
-		// Add metadata to CreateMultipartUpload func.
-		var meta *Metadata
-		if w.cfg.IncludeMetadata {
-			meta = w.srcClient.HeadObject(ctx, &obj.Key)
+	part, err := w.startMultipartUpload(ctx, obj, destKey)
+	if err != nil {
+		return &TransferResult{
+			status: "ERROR",
+			err:    err,
 		}
+	}
+	//update etag of part in db
+	w.db.UpdateItem(ctx, &obj.Key, obj.Number, &TransferResult{
+		status: "DONE",
+		etag:   part.etag,
+		err:    nil,
+	})
 
-		uploadID, err = w.desClient.CreateMultipartUpload(ctx, destKey, &w.cfg.DestStorageClass, &w.cfg.DestAcl, meta)
+	//query db if the multipart upload mission finish
+	notDoneItem, err := w.db.QueryNotDoneItem(ctx, &obj.Key, obj.Number)
+	if err != nil {
+		log.Printf("Failed to query not done item ! Error:%v\n", err)
+	}
+	if notDoneItem == nil { //all parts finished
+		//get all parts from db.
+		items, err := w.db.QueryItems(ctx, &obj.Key, obj.Number)
+		//complete multipart upload
+
+		allParts := make([]*Part, len(items))
+		for _, item := range items {
+			p := &Part{
+				partNumber: item.Number,
+				etag:       &item.Etag,
+			}
+			allParts = append(allParts, p)
+		}
+		_, err = w.desClient.CompleteMultipartUpload(ctx, destKey, &obj.UploadId, allParts)
 		if err != nil {
-			log.Printf("Failed to create upload ID - %s for %s\n", err.Error(), *destKey)
+			log.Printf("Failed to complete upload for %s - %s\n", obj.Key, err.Error())
+			w.desClient.AbortMultipartUpload(ctx, destKey, &obj.UploadId)
 			return &TransferResult{
 				status: "ERROR",
 				err:    err,
@@ -688,28 +898,10 @@ func (w *Worker) migrateBigFile(ctx context.Context, obj *Object, destKey *strin
 		}
 	}
 
-	allParts, err := w.startMultipartUpload(ctx, obj, destKey, uploadID, parts, transferCh)
-	if err != nil {
-		return &TransferResult{
-			status: "ERROR",
-			err:    err,
-		}
-	}
-
-	etag, err := w.desClient.CompleteMultipartUpload(ctx, destKey, uploadID, allParts)
-	if err != nil {
-		log.Printf("Failed to complete upload for %s - %s\n", obj.Key, err.Error())
-		w.desClient.AbortMultipartUpload(ctx, destKey, uploadID)
-		return &TransferResult{
-			status: "ERROR",
-			err:    err,
-		}
-
-	}
 	// log.Printf("Completed the transfer of %s with etag %s\n", obj.Key, *etag)
 	return &TransferResult{
 		status: "DONE",
-		etag:   etag,
+		etag:   part.etag,
 		err:    nil,
 	}
 }
@@ -731,64 +923,18 @@ func (w *Worker) getTotalParts(size int64) (totalParts, chunkSize int) {
 }
 
 // A func to perform multipart upload
-func (w *Worker) startMultipartUpload(ctx context.Context, obj *Object, destKey, uploadID *string, parts map[int](*Part), transferCh chan struct{}) ([]*Part, error) {
+func (w *Worker) startMultipartUpload(ctx context.Context, obj *Object, destKey *string) (*Part, error) {
+	result := w.transfer(ctx, obj, destKey, int64(obj.Start), int64(obj.ChunkSize), &obj.UploadId, obj.Number, nil)
 
-	totalParts, chunkSize := w.getTotalParts(obj.Size)
-	// log.Printf("Total parts are %d for %s\n", totalParts, obj.Key)
-
-	var wg sync.WaitGroup
-
-	partCh := make(chan *Part, totalParts)
-	partErrorCh := make(chan error, totalParts) // Capture Errors
-
-	for i := 0; i < totalParts; i++ {
-		partNumber := i + 1
-
-		if part, found := parts[partNumber]; found {
-			// log.Printf("Part %d found with etag %s, no need to transfer again\n", partNumber, *part.etag)
-			// Simply put the part info to the channel
-			partCh <- part
-		} else {
-			// If not, upload the part
-			wg.Add(1)
-			transferCh <- struct{}{}
-
-			go func(i int) {
-				defer wg.Done()
-				result := w.transfer(ctx, obj, destKey, int64(i*chunkSize), int64(chunkSize), uploadID, partNumber, nil)
-
-				if result.err != nil {
-					partErrorCh <- result.err
-				} else {
-					part := &Part{
-						partNumber: i + 1,
-						etag:       result.etag,
-					}
-					partCh <- part
-				}
-
-				<-transferCh
-			}(i)
+	if result.err != nil {
+		return nil, result.err
+	} else {
+		part := &Part{
+			partNumber: obj.Number,
+			etag:       result.etag,
 		}
+		return part, nil
 	}
-
-	wg.Wait()
-	close(partErrorCh)
-	close(partCh)
-
-	for err := range partErrorCh {
-		// returned when at least 1 error
-		return nil, err
-	}
-
-	allParts := make([]*Part, totalParts)
-	for i := 0; i < totalParts; i++ {
-		// The list of parts must be in ascending order
-		p := <-partCh
-		allParts[p.partNumber-1] = p
-	}
-
-	return allParts, nil
 }
 
 // transfer is a process to download data from source and upload to destination
