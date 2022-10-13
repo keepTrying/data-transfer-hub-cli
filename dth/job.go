@@ -278,42 +278,17 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 			if tsize, found := target[*srcKey]; !found || *tsize != obj.Size {
 				// log.Printf("Find a difference %s - %d\n", key, size)
 				// batch[i] = obj.toString()
-				msgCh <- obj.toString()
-				i++
-				if i%f.cfg.MessageBatchSize == 0 {
-					wg.Add(1)
-					j++
-					if j%100 == 0 {
-						log.Printf("Found %d batches in prefix /%s\n", j, *prefix)
-					}
-					batchCh <- struct{}{}
-
-					// start a go routine to send messages in batch
-					go func(i int) {
-						defer wg.Done()
-						batch := make([]*string, i)
-						for a := 0; a < i; a++ {
-							batch[a] = <-msgCh
-						}
-
-						f.sqs.SendMessageInBatch(ctx, batch)
-						<-batchCh
-					}(f.cfg.MessageBatchSize)
-					i = 0
-				}
-
 				if obj.Size > int64(f.cfg.ChunkSize) {
 					partSum, chunkSize := f.getTotalParts(obj.Size)
-					var partNum int
-					var start int64
-
 					var meta *Metadata
 					if f.cfg.IncludeMetadata {
 						meta = f.srcClient.HeadObject(ctx, &obj.Key)
 					}
 				createMultipartUpload:
+					var partNum int = 0
+					var start int64 = 0
 					//create multipart upload
-					uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, &obj.Key, &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
+					uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, appendPrefix(srcKey, &f.cfg.DestPrefix), &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
 					if err2 != nil {
 						log.Printf("create multipart upload fail! err:%v \n", err2.Error())
 						time.Sleep(1 * time.Minute)
@@ -339,9 +314,9 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 						msgCh <- sObj.toString()
 						// Log in DynamoDB
 					putToDb:
-						err3 := f.db.PutItem(ctx, obj)
+						err3 := f.db.PutItem(ctx, sObj)
 						if err3 != nil {
-							log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+							log.Printf("put part item to DynamoDb fail! part:%+v err:%v \n", sObj, err3.Error())
 							time.Sleep(1 * time.Minute)
 							goto putToDb
 						}
@@ -479,7 +454,7 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 				}
 			createMultipartUpload:
 				//create multipart upload
-				uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, &obj.Key, &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
+				uploadId, err2 := f.desClient.CreateMultipartUpload(ctx, appendPrefix(removePrefix(&obj.Key, &f.cfg.SrcPrefix), &f.cfg.DestPrefix), &f.cfg.DestStorageClass, &f.cfg.DestAcl, meta)
 				if err2 != nil {
 					log.Printf("create multipart upload fail! err:%v \n", err2.Error())
 					time.Sleep(1 * time.Minute)
@@ -505,9 +480,9 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 					msgCh <- sObj.toString()
 					// Log in DynamoDB
 				putToDb:
-					err3 := f.db.PutItem(ctx, obj)
+					err3 := f.db.PutItem(ctx, sObj)
 					if err3 != nil {
-						log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
+						log.Printf("put part item to DynamoDb fail! part:%+v err:%v \n", sObj, err3.Error())
 						time.Sleep(1 * time.Minute)
 						goto putToDb
 					}

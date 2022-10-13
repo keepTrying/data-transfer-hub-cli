@@ -1,6 +1,6 @@
 srcType: Amazon_S3
 srcBucket: test-fs-app
-srcPrefix:
+srcPrefix: 10/
 srcRegion: ap-northeast-2
 srcEndpoint:
 srcCredential: global
@@ -8,8 +8,8 @@ srcInCurrentAccount: false
 skipCompare: false
 
 destType: Aliyun_OSS
-destBucket: test-fs-app
-destPrefix: testdth/
+destBucket: fs-app
+destPrefix: testdth/1001/
 destRegion:
 destEndpoint: oss-cn-beijing.aliyuncs.com
 destCredential: cn-oss
@@ -21,11 +21,11 @@ jobTableName: test-table
 jobQueueName: test-queue
 
 options:
-  chunkSize: 5
+  chunkSize: 10
   multipartThreshold: 10
   maxKeys: 1000
   messageBatchSize: 10
   finderDepth: 0
-  finderNumber: 1
+  finderNumber: 8
   workerNumber: 8
   includeMetadata: false
