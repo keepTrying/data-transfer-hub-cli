@@ -39,7 +39,7 @@ const (
 	DefaultMultipartThreshold int = 10
 
 	// DefaultChunkSize is the chunk size (in MB) for each part when using multipart upload
-	DefaultChunkSize int = 5
+	DefaultChunkSize int = 10
 
 	// DefaultMaxParts the maximum number of parts is 10000 for multipart upload
 	DefaultMaxParts int = 10000
@@ -51,7 +51,7 @@ const (
 	DefaultFinderDepth int = 0
 
 	// DefaultFinderNumber is the number of finder threads to run in parallel
-	DefaultFinderNumber int = 1
+	DefaultFinderNumber int = 8
 
 	// DefaultWorkerNumber is the number of worker threads to run in parallel
 	DefaultWorkerNumber int = 8
