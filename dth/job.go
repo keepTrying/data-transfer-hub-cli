@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"os/exec"
@@ -276,9 +277,9 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 			// Currently, map is used to search if such object exists in target
 			srcKey := removePrefix(&obj.Key, prefix)
 			if tsize, found := target[*srcKey]; !found || *tsize != obj.Size {
-				// log.Printf("Find a difference %s - %d\n", key, size)
+				log.Printf("Find object %s - size:%d\n", obj.Key, obj.Size)
 				// batch[i] = obj.toString()
-				if obj.Size > int64(f.cfg.ChunkSize) {
+				if obj.Size > int64(f.cfg.ChunkSize*MB) {
 					partSum, chunkSize := f.getTotalParts(obj.Size)
 					var meta *Metadata
 					if f.cfg.IncludeMetadata {
@@ -346,12 +347,12 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 					}
 				} else {
 					msgCh <- obj.toString()
-				putToDb1:
+					//putToDb1:
 					err3 := f.db.PutItem(ctx, obj)
 					if err3 != nil {
 						log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
-						time.Sleep(1 * time.Minute)
-						goto putToDb1
+						//time.Sleep(5*time.Second)
+						//goto putToDb1
 					}
 					i++
 					if i%f.cfg.MessageBatchSize == 0 {
@@ -443,7 +444,7 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 			// TODO: Check if there is another way to compare
 			// Currently, map is used to search if such object exists in target
 
-			if obj.Size > int64(f.cfg.ChunkSize) {
+			if obj.Size > int64(f.cfg.ChunkSize*MB) {
 				partSum, chunkSize := f.getTotalParts(obj.Size)
 				var partNum int
 				var start int64
@@ -479,12 +480,12 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 					}
 					msgCh <- sObj.toString()
 					// Log in DynamoDB
-				putToDb:
+					//putToDb:
 					err3 := f.db.PutItem(ctx, sObj)
 					if err3 != nil {
 						log.Printf("put part item to DynamoDb fail! part:%+v err:%v \n", sObj, err3.Error())
-						time.Sleep(1 * time.Minute)
-						goto putToDb
+						//time.Sleep(1 * time.Minute)
+						//goto putToDb
 					}
 					start += int64(curChunkSize)
 					i++
@@ -843,33 +844,47 @@ func (w *Worker) migrateBigFile(ctx context.Context, obj *Object, destKey *strin
 		etag:   part.etag,
 		err:    nil,
 	})
-
+queryNotDoneItem:
 	//query db if the multipart upload mission finish
-	notDoneItem, err := w.db.QueryNotDoneItem(ctx, &obj.Key, obj.Number)
+	notDoneItem, err := w.db.QueryNotDoneItem(ctx, &obj.Key)
 	if err != nil {
 		log.Printf("Failed to query not done item ! Error:%v\n", err)
+		time.Sleep(5 * time.Second)
+		goto queryNotDoneItem
 	}
 	if notDoneItem == nil { //all parts finished
 		//get all parts from db.
-		items, err := w.db.QueryItems(ctx, &obj.Key, obj.Number)
+		items, err := w.db.QueryItems(ctx, &obj.Key)
 		//complete multipart upload
-
-		allParts := make([]*Part, len(items))
-		for _, item := range items {
-			p := &Part{
-				partNumber: item.Number,
-				etag:       &item.Etag,
-			}
-			allParts = append(allParts, p)
-		}
-		_, err = w.desClient.CompleteMultipartUpload(ctx, destKey, &obj.UploadId, allParts)
 		if err != nil {
-			log.Printf("Failed to complete upload for %s - %s\n", obj.Key, err.Error())
-			w.desClient.AbortMultipartUpload(ctx, destKey, &obj.UploadId)
+			//log.Printf("Failed to query multipart upload parts for %s - %s\n", obj.Key, err.Error())
+			//w.desClient.AbortMultipartUpload(ctx, destKey, &obj.UploadId)
 			return &TransferResult{
 				status: "ERROR",
 				err:    err,
 			}
+		}
+		allParts := make([]*Part, len(items))
+		for i, item := range items {
+			//fmt.Printf("items i:%v item:%+v\n", i, *item)
+			p := &Part{
+				partNumber: item.Number,
+				etag:       &item.Etag,
+			}
+			allParts[i] = p
+		}
+		//fmt.Printf("all items :%+v all parts:%+v\n", items, allParts)
+	completeMultipart:
+		_, err = w.desClient.CompleteMultipartUpload(ctx, destKey, &obj.UploadId, allParts)
+		if err != nil {
+			log.Printf("Failed to complete upload for %s - %s\n", obj.Key, err.Error())
+			//w.desClient.AbortMultipartUpload(ctx, destKey, &obj.UploadId)
+			time.Sleep(10 * time.Second)
+			goto completeMultipart
+			//return &TransferResult{
+			//	status: "ERROR",
+			//	err:    err,
+			//}
 		}
 	}
 
@@ -902,6 +917,7 @@ func (w *Worker) startMultipartUpload(ctx context.Context, obj *Object, destKey 
 	result := w.transfer(ctx, obj, destKey, int64(obj.Start), int64(obj.ChunkSize), &obj.UploadId, obj.Number, nil)
 
 	if result.err != nil {
+		fmt.Printf("multipart upload error! objKey:%v destKey:%v start:%v chunkSize:%v uploadId:%v partNumber:%v message:%v", obj.Key, *destKey, obj.Start, obj.ChunkSize, obj.UploadId, obj.Number, result.err.Error())
 		return nil, result.err
 	} else {
 		part := &Part{

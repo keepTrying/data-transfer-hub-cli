@@ -1,6 +1,6 @@
 destType: Amazon_S3
-destBucket: test-fs-app
-destPrefix: 1002/
+destBucket: fs-app-kr
+destPrefix: testdth/1004/
 destRegion: ap-northeast-2
 destEndpoint:
 destCredential: global
@@ -9,7 +9,7 @@ skipCompare: false
 
 srcType: Aliyun_OSS
 srcBucket: fs-app
-srcPrefix: test-dth-2
+srcPrefix: testdth
 srcRegion:
 srcEndpoint: oss-cn-beijing.aliyuncs.com
 srcCredential: cn-oss
@@ -25,6 +25,7 @@ options:
   multipartThreshold: 10
   maxKeys: 1000
   messageBatchSize: 10
-  finderDepth: 8
+  finderDepth: 0
+  finderNumber: 8
   workerNumber: 8
   includeMetadata: false

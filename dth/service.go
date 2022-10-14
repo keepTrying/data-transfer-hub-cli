@@ -447,54 +447,52 @@ func (db *DBService) QueryItem(ctx context.Context, key *string, number int) (*I
 
 }
 
-// QueryNotDoneItem is a function to query a not done item by Key and number in DynamoDB
-func (db *DBService) QueryNotDoneItem(ctx context.Context, key *string, number int) (*Item, error) {
-	// log.Printf("Query item for %s in DynamoDB\n", *key)
-
-	input := &dynamodb.GetItemInput{
+// QueryNotDoneItem is a function to query a not done item by Key in DynamoDB
+func (db *DBService) QueryNotDoneItem(ctx context.Context, key *string) (*Item, error) {
+	log.Printf("Query not done item for %s in DynamoDB\n", *key)
+	input := &dynamodb.QueryInput{
 		TableName: &db.tableName,
-		Key: map[string]dtype.AttributeValue{
-			"ObjectKey": &dtype.AttributeValueMemberS{Value: *key},
-			"Number":    &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
+		ExpressionAttributeValues: map[string]dtype.AttributeValue{
+			":o":    &dtype.AttributeValueMemberS{Value: *key},
+			":done": &dtype.AttributeValueMemberS{Value: "DONE"},
 		},
-		ExpressionAttributeNames: map[string]string{"done": "DONE"},
-		ProjectionExpression:     aws.String("JobStatus <> :done"),
+		KeyConditionExpression:   aws.String("#o = :o"),
+		ExpressionAttributeNames: map[string]string{"#o": "ObjectKey", "#j": "JobStatus"},
+		FilterExpression:         aws.String("#j <> :done"),
 	}
 
-	output, err := db.client.GetItem(ctx, input)
+	output, err := db.client.Query(ctx, input)
 
 	if err != nil {
-		log.Printf("Error querying item for %s in DynamoDB - %s\n", *key, err.Error())
+		log.Printf("Error querying not done item for %s in DynamoDB - %s\n", *key, err.Error())
 		return nil, err
 	}
-
-	if output.Item == nil {
-		log.Printf("Item for %s does not exist in DynamoDB", *key)
+	log.Printf("query not done item for %s in DynamoDB - output:%+v\n", *key, *output)
+	if output.Count == 0 {
+		log.Printf("Not down Item for %s does not exist in DynamoDB", *key)
 		return nil, nil
 	}
-
 	item := &Item{}
-
-	err = attributevalue.UnmarshalMap(output.Item, item)
+	err = attributevalue.UnmarshalMap(output.Items[0], item)
 	if err != nil {
 		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
 	}
+	log.Printf("query not done item for %s in DynamoDB - number:%v status:%v\n", *key, item.Number, item.JobStatus)
 	return item, nil
 
 }
 
 // QueryItems is a function to query items by Key in DynamoDB
-func (db *DBService) QueryItems(ctx context.Context, key *string, number int) ([]*Item, error) {
+func (db *DBService) QueryItems(ctx context.Context, key *string) ([]*Item, error) {
 	// log.Printf("Query item for %s in DynamoDB\n", *key)
 	input := &dynamodb.QueryInput{
 		TableName: &db.tableName,
 		ExpressionAttributeValues: map[string]dtype.AttributeValue{
-			"o": &dtype.AttributeValueMemberS{Value: *key},
-			"n": &dtype.AttributeValueMemberN{Value: strconv.Itoa(number)},
+			":o": &dtype.AttributeValueMemberS{Value: *key},
 		},
-		KeyConditionExpression:   aws.String("ObjectKey = :o AND Number = :n"),
-		AttributesToGet:          []string{"Etag", "Number"},
-		ExpressionAttributeNames: map[string]string{},
+		KeyConditionExpression: aws.String("#o = :o"),
+		//AttributesToGet:          []string{"Etag", "Number"},
+		ExpressionAttributeNames: map[string]string{"#o": "ObjectKey"},
 	}
 
 	output, err := db.client.Query(ctx, input)
@@ -508,10 +506,10 @@ func (db *DBService) QueryItems(ctx context.Context, key *string, number int) ([
 		log.Printf("Item for %s does not exist in DynamoDB", *key)
 		return nil, nil
 	}
-
+	//log.Printf("query items for %s output:%+v", *key, output)
 	items := make([]*Item, len(output.Items))
 
-	err = attributevalue.UnmarshalListOfMaps(output.Items, items)
+	err = attributevalue.UnmarshalListOfMaps(output.Items, &items)
 	if err != nil {
 		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
 	}

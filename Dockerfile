@@ -9,7 +9,7 @@ RUN cd /tmp && \
 
 WORKDIR /build
 COPY . .
-RUN PATH=$PATH:/usr/local/go/bin GOPROXY=https://goproxy.io,direct GOOS=linux go build -o dthcli .
+RUN PATH=$PATH:/usr/local/go/bin GOPROXY=https://goproxy.cn,direct GOOS=linux go build -o dthcli .
 
 FROM amazonlinux:latest
 

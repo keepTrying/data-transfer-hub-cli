@@ -170,10 +170,10 @@ func (c *S3Client) GetObject(ctx context.Context, key *string, size, start, chun
 func (c *S3Client) listObjectFn(ctx context.Context, continuationToken, prefix, delimiter *string, maxKeys int32) (*s3.ListObjectsV2Output, error) {
 
 	input := &s3.ListObjectsV2Input{
-		Bucket:    &c.bucket,
-		Prefix:    prefix,
-		MaxKeys:   maxKeys,
-		Delimiter: delimiter,
+		Bucket:       &c.bucket,
+		Prefix:       prefix,
+		MaxKeys:      maxKeys,
+		Delimiter:    delimiter,
 		EncodingType: "url",
 	}
 
@@ -495,7 +495,7 @@ func (c *S3Client) CompleteMultipartUpload(ctx context.Context, key, uploadID *s
 	// Need to convert dth.Part to types.CompletedPart
 	// var completedPart []types.CompletedPart
 	completedPart := make([]types.CompletedPart, len(parts))
-
+	log.Printf("Completed parts are:%+v", parts)
 	for i, part := range parts {
 		cp := types.CompletedPart{
 			PartNumber: int32(part.partNumber),
@@ -503,7 +503,7 @@ func (c *S3Client) CompleteMultipartUpload(ctx context.Context, key, uploadID *s
 		}
 		completedPart[i] = cp
 	}
-	// log.Println("Completed parts are:")
+
 	// log.Println(completedPart)
 
 	input := &s3.CompleteMultipartUploadInput{
