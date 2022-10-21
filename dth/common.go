@@ -151,6 +151,10 @@ func removePrefix(key, prefix *string) *string {
 	if !strings.HasSuffix(*prefix, "/") {
 		delimiter = "/"
 	}
+	if !strings.HasPrefix(*key, *prefix) {
+		newkey := *key + delimiter
+		return &newkey
+	}
 	newkey := strings.Replace(*key, *prefix+delimiter, "", 1)
 	return &newkey
 }

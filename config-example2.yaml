@@ -1,21 +1,20 @@
 destType: Amazon_S3
-destBucket: fs-app-kr
-destPrefix: testdth/1005/
+destBucket: test-fs-app
+destPrefix: testdth/102101/
 destRegion: ap-northeast-2
 destEndpoint:
 destCredential: global
 destInCurrentAccount: false
-skipCompare: false
+skipCompare: true
 
 srcType: Aliyun_OSS
-srcBucket: fs-app
-srcPrefix: testdth/1005
+srcBucket: test-fs-app
+srcPrefix: 702/
 srcRegion:
 srcEndpoint: oss-cn-beijing.aliyuncs.com
 srcCredential: cn-oss
 srcStorageClass: STANDARD
 srcInCurrentAccount: false
-srcAcl: bucket-owner-full-control
 
 jobTableName: test-table
 jobQueueName: test-queue

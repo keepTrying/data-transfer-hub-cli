@@ -347,12 +347,12 @@ func (f *Finder) compareAndSend(ctx context.Context, prefix *string, batchCh cha
 					}
 				} else {
 					msgCh <- obj.toString()
-					//putToDb1:
+				putToDb1:
 					err3 := f.db.PutItem(ctx, obj)
 					if err3 != nil {
 						log.Printf("put item to DynamoDb fail! err:%v \n", err3.Error())
-						//time.Sleep(5*time.Second)
-						//goto putToDb1
+						time.Sleep(5 * time.Second)
+						goto putToDb1
 					}
 					i++
 					if i%f.cfg.MessageBatchSize == 0 {
@@ -480,12 +480,12 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 					}
 					msgCh <- sObj.toString()
 					// Log in DynamoDB
-					//putToDb:
+				putToDb:
 					err3 := f.db.PutItem(ctx, sObj)
 					if err3 != nil {
 						log.Printf("put part item to DynamoDb fail! part:%+v err:%v \n", sObj, err3.Error())
-						//time.Sleep(1 * time.Minute)
-						//goto putToDb
+						time.Sleep(1 * time.Minute)
+						goto putToDb
 					}
 					start += int64(curChunkSize)
 					i++
@@ -765,8 +765,12 @@ func (w *Worker) processResult(ctx context.Context, obj *Object, rh *string, res
 	// log.Println("Processing result...")
 
 	log.Printf("----->Transferred 1 object %s with status %s\n", obj.Key, res.status)
-	w.db.UpdateItem(ctx, &obj.Key, obj.Number, res)
-
+updateItem:
+	err := w.db.UpdateItem(ctx, &obj.Key, obj.Number, res)
+	if err != nil {
+		time.Sleep(5 * time.Second)
+		goto updateItem
+	}
 	if res.status == "DONE" || res.status == "CANCEL" {
 		w.sqs.DeleteMessage(ctx, rh)
 	}
@@ -876,7 +880,7 @@ queryNotDoneItem:
 		//fmt.Printf("all items :%+v all parts:%+v\n", items, allParts)
 	completeMultipart:
 		_, err = w.desClient.CompleteMultipartUpload(ctx, destKey, &obj.UploadId, allParts)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "api error NoSuchUpload") {
 			log.Printf("Failed to complete upload for %s - %s\n", obj.Key, err.Error())
 			//w.desClient.AbortMultipartUpload(ctx, destKey, &obj.UploadId)
 			time.Sleep(10 * time.Second)

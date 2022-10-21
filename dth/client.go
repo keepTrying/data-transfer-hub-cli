@@ -426,15 +426,20 @@ func (c *S3Client) DeleteObject(ctx context.Context, key *string) (err error) {
 // All parts will be uploaded with this upload ID, after that, all parts by this ID will be combined to create the full object.
 func (c *S3Client) CreateMultipartUpload(ctx context.Context, key, storageClass, acl *string, meta *Metadata) (uploadID *string, err error) {
 	// log.Printf("S3> Create Multipart Upload for %s\n", *key)
-	if *acl == "" {
-		*acl = string(types.ObjectCannedACLBucketOwnerFullControl)
+	var strAcl string = *acl
+	if acl == nil || strAcl == "" {
+		strAcl = string(types.ObjectCannedACLBucketOwnerFullControl)
+	}
+	var strStorageClass string = *storageClass
+	if storageClass == nil || strStorageClass == "" {
+		strStorageClass = string(types.StorageClassStandard)
 	}
 
 	input := &s3.CreateMultipartUploadInput{
 		Bucket:       &c.bucket,
 		Key:          key,
-		StorageClass: types.StorageClass(*storageClass),
-		ACL:          types.ObjectCannedACL(*acl),
+		StorageClass: types.StorageClass(strStorageClass),
+		ACL:          types.ObjectCannedACL(strAcl),
 	}
 	if meta != nil {
 		input.ContentType = meta.ContentType
@@ -447,6 +452,7 @@ func (c *S3Client) CreateMultipartUpload(ctx context.Context, key, storageClass,
 	output, err := c.client.CreateMultipartUpload(ctx, input)
 	if err != nil {
 		log.Printf("S3> Unable to create multipart upload for %s - %s\n", *key, err.Error())
+		log.Printf("S3> Create multipart upload for %s - bucket:%s,key:%s,acl:%s,storageClass:%s\n", *key, c.bucket, *key, types.ObjectCannedACL(strAcl), string(types.StorageClass(strStorageClass)))
 	} else {
 		uploadID = output.UploadId
 		// log.Printf("S3> Create Multipart Upload for %s - upload id is %s\n", key, *output.UploadId)
@@ -520,7 +526,7 @@ func (c *S3Client) CompleteMultipartUpload(ctx context.Context, key, uploadID *s
 		// etag = output.ETag
 		_etag := strings.Trim(*output.ETag, "\"")
 		etag = &_etag
-		// log.Printf("S3> Completed multipart uploads for %s - etag is %s\n", key, *output.ETag)
+		log.Printf("S3> Completed multipart uploads for %s - etag is %s\n", *key, *output.ETag)
 	}
 
 	return
